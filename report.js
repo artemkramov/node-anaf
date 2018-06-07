@@ -48,6 +48,22 @@ var undefined;
 var files = [];
 
 /**
+ * All possible states of the cash register
+ * @type {{}}
+ */
+var stateEnum = {
+    WORK_MODE: 0,
+    REPORT_MODE: 1,
+    READY_MODE: 2,
+    READ_MODE: 3,
+    READ_SUCCESS: 4,
+    READ_FAIL: 5
+};
+Object.freeze(stateEnum);
+
+const DefaultTimeout = 1500;
+
+/**
  * Get all XML files from the given IP address
  * @param address
  * @returns {Promise}
@@ -89,7 +105,7 @@ exports.runReport = function (address) {
                     reject(err);
                 });
             }, function (err) {
-               reject(err);
+                reject(err);
             });
         }, function (err) {
             reject(err);
@@ -105,9 +121,9 @@ exports.runReport = function (address) {
  */
 function processReport(start, end) {
     files = [];
-    if (end !== 0) {
-        start += 1;
-    }
+    // if (end !== 0) {
+    //     start += 1;
+    // }
     return new Promise(function (resolve, reject) {
 
         /**
@@ -139,14 +155,15 @@ function processReport(start, end) {
                     var response = writeFiles(start, end);
                     if (response === true) {
 
-                        /**
-                         * Update ANAF table
-                         */
-                        updateANAF(end).then(function () {
-                            resolve();
-                        }, function (err) {
-                           reject(err);
-                        });
+                        resolve();
+                        // /**
+                        //  * Update ANAF table
+                        //  */
+                        // updateANAF(end).then(function () {
+                        //     resolve();
+                        // }, function (err) {
+                        //     reject(err);
+                        // });
                     }
                     else {
                         reject(response);
@@ -213,6 +230,24 @@ function updateANAF(zReport) {
     });
 }
 
+function updateANAFStatus(statusID) {
+    return new Promise(function (resolve, reject) {
+        client.runRequest(uriANAF, 'POST', {
+            State: statusID
+        }, {
+            json: true,
+            timeout: 30000,
+            headers: {
+                'X-HTTP-Method-Override': 'PATCH'
+            }
+        }).then(function (response) {
+            resolve();
+        }, function (err) {
+            reject(err);
+        });
+    });
+}
+
 /**
  * Process A4203 report
  * @param currentZ
@@ -234,7 +269,7 @@ function processA4203(currentZ, end, callback) {
          * Else run callback function
          */
         if (currentZ < end) {
-            self.processA4203(currentZ + 1, end, callback);
+            processA4203(currentZ + 1, end, callback);
         }
         else {
             callback();
@@ -250,7 +285,7 @@ function processA4203(currentZ, end, callback) {
  */
 function getLastZReport() {
     return new Promise(function (resolve, reject) {
-        client.runRequest(uriState, 'GET', undefined, { json: true }).then(function (response) {
+        client.runRequest(uriState, 'GET', undefined, {json: true}).then(function (response) {
             resolve(response);
         }, function (err) {
             reject(err);
@@ -264,10 +299,104 @@ function getLastZReport() {
  */
 function getLastExportedZReport() {
     return new Promise(function (resolve, reject) {
-        client.runRequest(uriANAF, 'GET', undefined, { json: true }).then(function (response) {
+        client.runRequest(uriANAF, 'GET', undefined, {json: true}).then(function (response) {
             resolve(response);
         }, function (err) {
             reject(err);
         });
     });
 }
+
+/**
+ * Get current state of the button
+ * @returns {Promise}
+ */
+exports.getCurrentANAFState = function () {
+    return new Promise(function (resolve, reject) {
+        client.runRequest(uriANAF, 'GET', undefined, {json: true, timeout: DefaultTimeout }).then(function (response) {
+            resolve(response);
+        }, function (err) {
+            reject(err);
+        });
+    });
+};
+
+/**
+ * Set ip address of the cash register
+ * @param address
+ */
+exports.setIPAddress = function (address) {
+    /**
+     * Remove extra symbols from the IP beginning
+     */
+    if (address.substr(0, 7) == "::ffff:") {
+        address = address.substr(7)
+    }
+    url = 'http://';
+    url += address;
+
+    /**
+     * Set URL in client
+     */
+    client.setUrl(url);
+};
+
+exports.processANAFState = function (state) {
+    return new Promise(function (resolve, reject) {
+        switch (state["State"]) {
+            case stateEnum['REPORT_MODE']:
+
+                /**
+                 * Rewrite the status of the cash register
+                 * Update ANAF table
+                 */
+                updateANAFStatus(stateEnum['READY_MODE']).then(function () {
+                    resolve("Detect button pressing and change status");
+                }, function (error) {
+                    reject(error);
+                });
+                break;
+            case stateEnum['READ_MODE']:
+
+                /**
+                 * Read Z report range
+                 * and run the report on this range
+                 */
+                var fromZ = state["FromZ"];
+                var toZ = state["ToZ"];
+
+                /**
+                 * Process reports from the given range
+                 */
+                processReport(fromZ, toZ).then(function () {
+
+                    /**
+                     * In case of success report export
+                     * set the appropriate status
+                     */
+                    updateANAFStatus(stateEnum['READ_SUCCESS']).then(function () {
+                        resolve("Export was made successfully!");
+                    }, function () {
+                        reject();
+                    });
+                }, function (err) {
+
+                    /**
+                     * In case of the error detection during the report export
+                     * set the appropriate status
+                     */
+                    updateANAFStatus(stateEnum['READ_FAIL']).then(function () {
+                        reject("Export process failed");
+                    }, function () {
+                        reject();
+                    });
+                });
+                break;
+            default:
+                resolve("Button was not pressed");
+                break;
+        }
+    });
+};
+
+

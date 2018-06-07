@@ -1,27 +1,41 @@
-var express = require('express');
-var app     = express();
-var port    =   8090;
+var undefined;
+var ip = '192.168.0.115';
+if (process.argv.length > 2 && process.argv[2] != undefined) {
+    ip = process.argv[2];
+}
+
 var report = require('./report.js');
 
-// ROUTES
-// ==============================================
+var commonErrorMessage = "Device is offline";
 
-// sample route with a route the way we're used to seeing it
-app.get("/report", function(req, res) {
-    var response = {};
-    var ip = req.ip;
-    //ip = '192.168.0.107';
-    report.runReport(ip).then(function () {
-        res.json(response);
-    }, function (err) {
-        response.err = err.message;
-        res.json(response);
-    });
-});
+// Global variable to check if the processing ability is locked
+global.isLocked = false;
 
-// we'll create our routes here
+// Timeout interval to examine the cash register
+var interval = 1000;
 
-// START THE SERVER
-// ==============================================
-app.listen(port);
-console.log('Start server');
+report.setIPAddress(ip);
+
+setInterval(function () {
+    if (!global.isLocked) {
+        global.isLocked = true;
+        report.getCurrentANAFState().then(function (state) {
+            report.processANAFState(state).then(function (message) {
+                console.log(message);
+            }, function (errorMessage) {
+                if (errorMessage == undefined) {
+                    errorMessage = commonErrorMessage;
+                }
+                console.log(errorMessage);
+            })
+            // Always handler
+                .then(function () {
+                    global.isLocked = false;
+
+                });
+        }, function () {
+            console.log(commonErrorMessage);
+            global.isLocked = false;
+        });
+    }
+}, interval);

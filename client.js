@@ -30,7 +30,7 @@ exports.runRequest = function (uri, method, data, extraOptions) {
             path: uri
         };
         if (data !== undefined) {
-            options.body = JSON.stringify(data);
+            options.body = data;//JSON.stringify(data);
         }
         if (extraOptions !== undefined) {
             extend(options, extraOptions);
